@@ -191,6 +191,48 @@ option{background:var(--navy3);color:var(--white)}
 .summary-cell{padding:10px 14px;font-size:11px;font-weight:700;color:var(--slate2);text-transform:uppercase;letter-spacing:.5px}
 .summary-num{padding:10px 14px;font-size:13px;font-weight:800;color:var(--white);text-align:center;font-variant-numeric:tabular-nums}
 
+/* ── CHECKBOX ── */
+.cb-wrap{display:flex;align-items:center;justify-content:center;padding:12px 10px}
+.cb{width:16px;height:16px;accent-color:var(--rose);cursor:pointer;border-radius:4px;flex-shrink:0}
+.cb-head{display:flex;align-items:center;justify-content:center;padding:10px}
+.row-selected{background:rgba(244,63,94,.04)!important}
+.row-selected td{border-color:rgba(244,63,94,.15)!important}
+
+/* ── DELETE TOOLBAR ── */
+.delete-toolbar{
+  display:none;align-items:center;justify-content:space-between;
+  padding:10px 20px;
+  background:rgba(244,63,94,.08);
+  border-bottom:1px solid rgba(244,63,94,.2);
+  animation:slideDown .2s ease;
+  gap:12px;flex-wrap:wrap;
+}
+.delete-toolbar.visible{display:flex}
+@keyframes slideDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.del-info{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#fb7185}
+.del-info svg{width:15px;height:15px;flex-shrink:0}
+.del-actions{display:flex;align-items:center;gap:8px}
+
+/* ── ROW DELETE BUTTON ── */
+.row-del-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:5px 10px;border-radius:7px;
+  background:transparent;border:1px solid transparent;
+  color:var(--slate3);font-family:inherit;font-size:12px;font-weight:600;
+  cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.row-del-btn svg{width:13px;height:13px;flex-shrink:0}
+.row-del-btn:hover{background:rgba(244,63,94,.1);border-color:rgba(244,63,94,.3);color:#fb7185}
+tr:hover .row-del-btn{color:var(--slate2)}
+
+/* ── CONFIRM MODAL (enhanced) ── */
+.confirm-box-danger::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--rose),#e11d48);border-radius:16px 16px 0 0}
+.confirm-icon-wrap{width:48px;height:48px;border-radius:12px;background:rgba(244,63,94,.12);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.confirm-icon-wrap svg{width:22px;height:22px;color:var(--rose)}
+.confirm-names{margin:10px 0 16px;display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto}
+.confirm-name-item{display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(244,63,94,.06);border:1px solid rgba(244,63,94,.12);border-radius:7px;font-size:12px;color:#fb7185}
+.confirm-name-item svg{width:12px;height:12px;flex-shrink:0;opacity:.7}
+
 /* ── TOAST ── */
 .toast{position:fixed;bottom:24px;right:24px;z-index:300;background:var(--navy3);border:1px solid var(--border2);border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:500;color:var(--white);box-shadow:0 8px 24px rgba(0,0,0,.4);animation:toastIn .25s cubic-bezier(.34,1.56,.64,1) forwards}
 @keyframes toastIn{from{opacity:0;transform:translateY(20px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
@@ -357,6 +399,23 @@ option{background:var(--navy3);color:var(--white)}
         <button class="btn btn-ghost" id="btnBackup" style="font-size:12px;padding:6px 12px"><i data-lucide="download"></i> Backup JSON</button>
       </div>
     </div>
+    <!-- DELETE TOOLBAR -->
+    <div class="delete-toolbar" id="deleteToolbar">
+      <div class="del-info">
+        <i data-lucide="check-square"></i>
+        <span>เลือกแล้ว <strong id="selectedCount">0</strong> รายการ</span>
+      </div>
+      <div class="del-actions">
+        <button class="btn btn-ghost" onclick="clearSelection()" style="font-size:12px;padding:6px 12px">
+          <i data-lucide="x"></i> ยกเลิกเลือก
+        </button>
+        <button class="btn" onclick="deleteSelected()"
+          style="background:linear-gradient(135deg,var(--rose),#e11d48);color:#fff;font-size:12px;padding:6px 14px;box-shadow:0 3px 10px rgba(244,63,94,.3)">
+          <i data-lucide="trash-2"></i> ลบที่เลือกทั้งหมด
+        </button>
+      </div>
+    </div>
+
     <div class="table-wrap">
       <table class="kpi-table">
         <thead id="tableHead"></thead>
@@ -367,14 +426,22 @@ option{background:var(--navy3);color:var(--white)}
 </main>
 </div>
 
-<!-- CONFIRM -->
+<!-- CONFIRM (enhanced) -->
 <div class="confirm-overlay" id="confirmOverlay" style="display:none">
-  <div class="confirm-box">
-    <div class="confirm-title" id="confirmTitle">ยืนยัน</div>
+  <div class="confirm-box" style="position:relative;overflow:hidden">
+    <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--rose),#e11d48)"></div>
+    <div style="width:48px;height:48px;border-radius:12px;background:rgba(244,63,94,.12);display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+      <i data-lucide="trash-2" style="width:22px;height:22px;color:var(--rose)"></i>
+    </div>
+    <div class="confirm-title" id="confirmTitle">ยืนยันการลบ</div>
     <div class="confirm-msg" id="confirmMsg"></div>
+    <div id="confirmNames" class="confirm-names" style="display:none"></div>
     <div class="confirm-actions">
       <button class="btn btn-ghost" id="confirmNo">ยกเลิก</button>
-      <button class="btn btn-danger" id="confirmYes">ยืนยัน</button>
+      <button class="btn" id="confirmYes"
+        style="background:linear-gradient(135deg,var(--rose),#e11d48);color:#fff;box-shadow:0 3px 12px rgba(244,63,94,.3)">
+        <i data-lucide="trash-2"></i> <span id="confirmYesLabel">ยืนยันลบ</span>
+      </button>
     </div>
   </div>
 </div>
@@ -418,9 +485,10 @@ const MONTH_Q = ['mh-q1','mh-q1','mh-q1','mh-q2','mh-q2','mh-q2','mh-q3','mh-q3'
 const LS_URL  = 'kpi_script_url';
 const LS_YEAR = 'kpi_year';
 
-let scriptUrl = '';
-let isDemoMode = false;
-let saveTimer  = null;
+let scriptUrl   = '';
+let isDemoMode  = false;
+let saveTimer   = null;
+let selectedIds = new Set();
 
 let state = {
   year: parseInt(localStorage.getItem(LS_YEAR)) || (new Date().getFullYear() + 543),
@@ -561,7 +629,10 @@ async function reloadData() {
 function buildTableHead() {
   document.getElementById('tableHead').innerHTML = `
   <tr>
-    <th style="min-width:180px;padding-left:20px">รายการ KPI</th>
+    <th style="width:42px;padding:0" class="center">
+      <div class="cb-head"><input type="checkbox" class="cb" id="cbAll" onclick="toggleAll(this.checked)" title="เลือกทั้งหมด"/></div>
+    </th>
+    <th style="min-width:180px;padding-left:10px">รายการ KPI</th>
     <th style="min-width:100px">ประเภท</th>
     <th style="min-width:80px">เป้าหมาย</th>
     <th style="min-width:70px" class="center">รูปแบบ</th>
@@ -569,7 +640,7 @@ function buildTableHead() {
     <th style="min-width:60px" class="center">ผลรวม</th>
     <th style="min-width:150px">ความคืบหน้า</th>
     <th style="min-width:100px" class="center">สถานะ</th>
-    <th class="right" style="padding-right:14px;min-width:60px"></th>
+    <th class="right" style="padding-right:14px;min-width:80px">จัดการ</th>
   </tr>`;
 }
 
@@ -590,13 +661,14 @@ function renderAll() {
   const list=state.filter==='ทั้งหมด'?state.tasks:state.tasks.filter(t=>t.category===state.filter);
   if (list.length===0) {
     body.innerHTML=`
-      <tr><td colspan="18"><div class="empty-state">
+      <tr><td colspan="19"><div class="empty-state">
         <div class="empty-icon"><i data-lucide="clipboard-list"></i></div>
         <div class="empty-title">ยังไม่มีรายการ KPI</div>
         <div class="empty-sub">กดปุ่ม "เพิ่มรายการ" เพื่อเริ่มบันทึก</div>
         <button class="btn btn-primary" onclick="addRow()" style="margin-top:8px"><i data-lucide="plus"></i> เพิ่มรายการแรก</button>
       </div></td></tr>
-      <tr class="add-row"><td colspan="18"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+      <tr class="add-row"><td colspan="19"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+    updateDeleteToolbar();
     return;
   }
   let st=0,sa=Array(12).fill(0),tot=0;
@@ -607,13 +679,23 @@ function renderAll() {
   });
   body.innerHTML = list.map(buildRow).join('') +
     `<tr class="summary-row">
+      <td></td>
       <td><div class="summary-cell">รวมทั้งหมด</div></td><td></td>
       <td><div class="summary-num">${st.toLocaleString()}</div></td><td></td>
       ${sa.map(v=>`<td><div class="summary-num">${v>0?v.toLocaleString():'<span style="color:var(--slate3)">-</span>'}</div></td>`).join('')}
       <td><div class="summary-num" style="color:#60a5fa">${tot.toLocaleString()}</div></td>
       <td colspan="3"></td>
     </tr>
-    <tr class="add-row"><td colspan="18"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+    <tr class="add-row"><td colspan="19"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+  // sync cbAll state
+  const cbAll = document.getElementById('cbAll');
+  if (cbAll) {
+    const allIds = list.map(t=>String(t.id));
+    const allChecked = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
+    cbAll.checked = allChecked;
+    cbAll.indeterminate = !allChecked && allIds.some(id => selectedIds.has(id));
+  }
+  updateDeleteToolbar();
 }
 
 function buildRow(task) {
@@ -622,9 +704,16 @@ function buildRow(task) {
   const pct=yt>0?Math.min((ya/yt)*100,100):0;
   const si=getStatusInfo(yt>0?(ya/yt)*100:0);
   const bc=BADGE[Math.max(0,state.categories.indexOf(task.category)%BADGE.length)];
+  const isSelected = selectedIds.has(String(task.id));
   return `
-  <tr id="row-${task.id}">
+  <tr id="row-${task.id}" class="${isSelected?'row-selected':''}">
+    <td style="width:42px;padding:0">
+      <div class="cb-wrap">
+        <input type="checkbox" class="cb" ${isSelected?'checked':''} onchange="toggleSelect('${task.id}',this.checked)" title="เลือกรายการนี้"/>
+      </div>
+    </td>
     <td class="cell-editable"><input class="cell-input" value="${esc(task.title)}" placeholder="ชื่อรายการ KPI..."
+      style="padding-left:10px"
       onchange="updateField('${task.id}','title',this.value)" oninput="updateField('${task.id}','title',this.value,true)"/></td>
     <td><select class="cell-select" onchange="updateField('${task.id}','category',this.value)">
       ${state.categories.map(c=>`<option value="${c}"${c===task.category?' selected':''}>${c}</option>`).join('')}
@@ -644,8 +733,10 @@ function buildRow(task) {
       <span class="prog-label" style="color:${si.txt}">${Math.round(yt>0?(ya/yt)*100:0)}%</span>
     </div></td>
     <td style="text-align:center;padding:8px"><span class="status ${si.cls}"><span class="status-dot"></span>${si.label}</span></td>
-    <td style="text-align:right;padding:6px 10px 6px 4px">
-      <button class="btn-icon" onclick="deleteRow('${task.id}')" style="color:var(--slate3)"><i data-lucide="trash-2"></i></button>
+    <td style="text-align:right;padding:6px 12px 6px 4px">
+      <button class="row-del-btn" onclick="deleteRow('${task.id}')">
+        <i data-lucide="trash-2"></i> ลบ
+      </button>
     </td>
   </tr>`;
 }
@@ -688,13 +779,107 @@ function addRow() {
   },80);
   showToast('เพิ่มรายการใหม่แล้ว');
 }
+
 function deleteRow(id) {
-  const t=state.tasks.find(t=>t.id==id);
-  showConfirm('ยืนยันการลบ',`ต้องการลบ "${t?.title||'รายการนี้'}" ใช่หรือไม่?`, ()=>{
-    state.tasks=state.tasks.filter(t=>t.id!=id);
-    save(); renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
-    showToast('ลบรายการสำเร็จ');
+  const t = state.tasks.find(t => t.id == id);
+  const name = t?.title || 'รายการนี้';
+  showConfirm(
+    'ยืนยันการลบรายการ',
+    `ต้องการลบรายการ KPI ต่อไปนี้ออกจากระบบ?`,
+    [name],
+    'ลบ 1 รายการ',
+    () => {
+      // flash row red before removing
+      const row = document.getElementById('row-'+id);
+      if (row) { row.style.transition='opacity .25s'; row.style.opacity='0'; }
+      setTimeout(() => {
+        selectedIds.delete(String(id));
+        state.tasks = state.tasks.filter(t => t.id != id);
+        save(); renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
+        showToast('ลบรายการสำเร็จ');
+      }, 220);
+    }
+  );
+}
+
+// ── CHECKBOX / BULK DELETE ───────────────────────────
+function toggleSelect(id, checked) {
+  if (checked) selectedIds.add(String(id));
+  else         selectedIds.delete(String(id));
+  // update row highlight
+  const row = document.getElementById('row-'+id);
+  if (row) row.classList.toggle('row-selected', checked);
+  // update cbAll
+  const list = state.filter==='ทั้งหมด' ? state.tasks : state.tasks.filter(t=>t.category===state.filter);
+  const cbAll = document.getElementById('cbAll');
+  if (cbAll) {
+    const allIds = list.map(t=>String(t.id));
+    const allChecked = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
+    cbAll.checked = allChecked;
+    cbAll.indeterminate = !allChecked && allIds.some(id => selectedIds.has(id));
+  }
+  updateDeleteToolbar();
+}
+
+function toggleAll(checked) {
+  const list = state.filter==='ทั้งหมด' ? state.tasks : state.tasks.filter(t=>t.category===state.filter);
+  list.forEach(t => {
+    if (checked) selectedIds.add(String(t.id));
+    else         selectedIds.delete(String(t.id));
+    const row = document.getElementById('row-'+t.id);
+    if (row) row.classList.toggle('row-selected', checked);
   });
+  // sync checkboxes in rows
+  document.querySelectorAll('tbody input.cb').forEach(cb => { cb.checked = checked; });
+  updateDeleteToolbar();
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.querySelectorAll('tbody input.cb').forEach(cb => { cb.checked = false; });
+  document.querySelectorAll('tbody tr').forEach(tr => tr.classList.remove('row-selected'));
+  const cbAll = document.getElementById('cbAll');
+  if (cbAll) { cbAll.checked = false; cbAll.indeterminate = false; }
+  updateDeleteToolbar();
+}
+
+function updateDeleteToolbar() {
+  const n = selectedIds.size;
+  const toolbar = document.getElementById('deleteToolbar');
+  const countEl = document.getElementById('selectedCount');
+  if (toolbar) {
+    toolbar.classList.toggle('visible', n > 0);
+    if (countEl) countEl.textContent = n;
+  }
+  lucide.createIcons();
+}
+
+function deleteSelected() {
+  const n = selectedIds.size;
+  if (n === 0) return;
+  const names = [...selectedIds].map(id => {
+    const t = state.tasks.find(t => String(t.id) === id);
+    return t?.title || `รายการ #${id}`;
+  });
+  showConfirm(
+    `ยืนยันการลบ ${n} รายการ`,
+    `ต้องการลบรายการ KPI ที่เลือกทั้งหมดออกจากระบบ?`,
+    names,
+    `ลบ ${n} รายการ`,
+    () => {
+      // fade out selected rows
+      selectedIds.forEach(id => {
+        const row = document.getElementById('row-'+id);
+        if (row) { row.style.transition='opacity .2s'; row.style.opacity='0'; }
+      });
+      setTimeout(() => {
+        state.tasks = state.tasks.filter(t => !selectedIds.has(String(t.id)));
+        selectedIds.clear();
+        save(); renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
+        showToast(`ลบ ${n} รายการสำเร็จ`);
+      }, 220);
+    }
+  );
 }
 
 // ── STATS ─────────────────────────────────────────────
@@ -745,8 +930,8 @@ function delCat(i){
   showToast(`ลบประเภท "${c}" สำเร็จ`);
 }
 function clearAll(){
-  showConfirm('ล้างข้อมูลทั้งหมด','ต้องการลบข้อมูล KPI ทั้งหมด? ไม่สามารถกู้คืนได้',()=>{
-    state.tasks=[]; save(); closeSettings();
+  showConfirm('ล้างข้อมูลทั้งหมด','ต้องการลบข้อมูล KPI ทั้งหมด? ไม่สามารถกู้คืนได้', [], 'ล้างทั้งหมด', ()=>{
+    state.tasks=[]; selectedIds.clear(); save(); closeSettings();
     renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
     showToast('ล้างข้อมูลทั้งหมดแล้ว');
   });
@@ -778,11 +963,24 @@ function backupData(){
 
 // ── CONFIRM / TOAST ──────────────────────────────────
 let confirmCb=null;
-function showConfirm(title,msg,onYes){
-  document.getElementById('confirmTitle').textContent=title;
-  document.getElementById('confirmMsg').textContent=msg;
-  document.getElementById('confirmOverlay').style.display='flex';
-  confirmCb=onYes; lucide.createIcons();
+function showConfirm(title, msg, names, btnLabel, onYes) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmMsg').textContent   = msg;
+  document.getElementById('confirmYesLabel').textContent = btnLabel || 'ยืนยันลบ';
+  // show name list
+  const namesEl = document.getElementById('confirmNames');
+  if (names && names.length) {
+    namesEl.style.display = 'flex';
+    namesEl.innerHTML = names.map(n =>
+      `<div class="confirm-name-item"><i data-lucide="minus-circle"></i>${n||'(ไม่มีชื่อ)'}</div>`
+    ).join('');
+  } else {
+    namesEl.style.display = 'none';
+    namesEl.innerHTML = '';
+  }
+  document.getElementById('confirmOverlay').style.display = 'flex';
+  confirmCb = onYes;
+  lucide.createIcons();
 }
 document.getElementById('confirmYes').onclick=()=>{ document.getElementById('confirmOverlay').style.display='none'; if(confirmCb){confirmCb();confirmCb=null;} };
 document.getElementById('confirmNo').onclick=()=>{ document.getElementById('confirmOverlay').style.display='none'; confirmCb=null; };
