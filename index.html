@@ -482,20 +482,40 @@ tr:hover .row-del-btn{color:var(--slate2)}
 const MONTHS  = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
 const BADGE   = ['b0','b1','b2','b3','b4','b5'];
 const MONTH_Q = ['mh-q1','mh-q1','mh-q1','mh-q2','mh-q2','mh-q2','mh-q3','mh-q3','mh-q3','mh-q4','mh-q4','mh-q4'];
-const LS_URL  = 'kpi_script_url';
-const LS_YEAR = 'kpi_year';
+const LS_URL    = 'kpi_script_url';
+const LS_YEAR   = 'kpi_year';
+const LS_FILTER = 'kpi_filter';
+
+const SAVE_DELAY_MS     = 800;
+const REFRESH_DELAY_MS  = 600;
+const CONNECT_DELAY_MS  = 600;
+const TOAST_DURATION_MS = 2800;
+const API_TIMEOUT_MS    = 15000;
+const ROW_FADE_MS       = 220;
+const CONFIRM_LIST_MAX  = 5;
+
+let _idSeq = 0;
+const newId = () => String(Date.now()) + '_' + (++_idSeq);
 
 let scriptUrl   = '';
 let isDemoMode  = false;
 let saveTimer   = null;
 let selectedIds = new Set();
+let _connecting = false;
 
 let state = {
   year: parseInt(localStorage.getItem(LS_YEAR)) || (new Date().getFullYear() + 543),
   categories: ["งานหลัก","งานรอง","งานสนับสนุน"],
   tasks: [],
-  filter: 'ทั้งหมด'
+  filter: localStorage.getItem(LS_FILTER) || 'ทั้งหมด'
 };
+
+// ── SHARED HELPERS ─────────────────────────────────────
+const findTaskById = id => state.tasks.find(t => String(t.id) === String(id));
+const yearlyTarget = t  => t.targetType === 'monthly' ? t.targetValue * 12 : t.targetValue;
+const yearlyActual = t  => t.actuals.reduce((a, b) => a + b, 0);
+function refreshUI() { renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons(); }
+function refreshCategoryUI() { save(); renderSettings(); renderFilterTabs(); renderAll(); lucide.createIcons(); }
 
 document.getElementById('yearInput').value = state.year;
 
@@ -518,13 +538,19 @@ function openSavedUrl() {
 
 // ── CONNECT ───────────────────────────────────────────
 async function connectSheets(url) {
+  if (_connecting) return;
+  _connecting = true;
   const u = url || document.getElementById('scriptUrl').value.trim();
-  if (!u || !u.startsWith('https://script.google.com')) {
-    setStatus('err','❌ URL ไม่ถูกต้อง ต้องขึ้นต้นด้วย https://script.google.com');
-    return;
+  if (!u) { setStatus('err','❌ กรุณาใส่ Web App URL'); _connecting = false; return; }
+  try {
+    const parsed = new URL(u);
+    if (parsed.hostname !== 'script.google.com' || parsed.protocol !== 'https:') throw new Error();
+  } catch {
+    setStatus('err','❌ URL ไม่ถูกต้อง ต้องเป็น https://script.google.com/macros/s/.../exec');
+    _connecting = false; return;
   }
-  scriptUrl = u;
   setStatus('loading','กำลังเชื่อมต่อ...');
+  scriptUrl = u;
   try {
     const data = await apiFetch('load');
     if (data.ok) {
@@ -533,12 +559,16 @@ async function connectSheets(url) {
       if (data.year)       { state.year = data.year; document.getElementById('yearInput').value = data.year; }
       localStorage.setItem(LS_URL, u);
       setStatus('ok','✅ เชื่อมต่อสำเร็จ! กำลังเปิด...');
-      setTimeout(enterApp, 600);
+      setTimeout(enterApp, CONNECT_DELAY_MS);
     } else {
+      scriptUrl = '';
       setStatus('err','❌ '+data.error);
     }
   } catch(e) {
+    scriptUrl = '';
     setStatus('err','❌ เชื่อมต่อไม่ได้: ' + e.message);
+  } finally {
+    _connecting = false;
   }
 }
 
@@ -557,7 +587,14 @@ function useDemoMode() {
   showToast('โหมดทดลอง — ข้อมูลจะไม่บันทึก','info');
 }
 
+function validateFilter() {
+  if (state.filter !== 'ทั้งหมด' && !state.categories.includes(state.filter)) {
+    state.filter = 'ทั้งหมด'; localStorage.setItem(LS_FILTER, 'ทั้งหมด');
+  }
+}
+
 function enterApp() {
+  validateFilter();
   document.getElementById('setupScreen').style.display = 'none';
   buildTableHead();
   renderAll();
@@ -570,16 +607,26 @@ function enterApp() {
 
 // ── API ───────────────────────────────────────────────
 async function apiFetch(action, data) {
-  if (action === 'load') {
-    const r = await fetch(scriptUrl + '?action=load');
-    return r.json();
-  } else {
-    const r = await fetch(scriptUrl, {
-      method:'POST', redirect:'follow',
-      headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({ action, data })
-    });
-    return r.json();
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+  try {
+    if (action === 'load') {
+      const r = await fetch(scriptUrl + '?action=load', { signal: ctrl.signal });
+      try { return await r.json(); } catch { throw new Error('เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง (ไม่ใช่ JSON)'); }
+    } else {
+      const r = await fetch(scriptUrl, {
+        method:'POST', redirect:'follow',
+        headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({ action, data }),
+        signal: ctrl.signal
+      });
+      try { return await r.json(); } catch { throw new Error('เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง (ไม่ใช่ JSON)'); }
+    }
+  } catch(e) {
+    if (e.name === 'AbortError') throw new Error('หมดเวลาเชื่อมต่อ (15 วินาที) กรุณาลองใหม่');
+    throw e;
+  } finally {
+    clearTimeout(tid);
   }
 }
 
@@ -594,35 +641,43 @@ function save() {
       else { setSyncUI('err'); showToast('บันทึกไม่สำเร็จ: '+r.error,'err'); }
     } catch(e) {
       setSyncUI('err');
-      showToast('บันทึกไม่สำเร็จ','err');
+      showToast('บันทึกไม่สำเร็จ: ' + e.message,'err');
+    } finally {
+      saveTimer = null;
     }
-  }, 800);
+  }, SAVE_DELAY_MS);
 }
 
 function setSyncUI(mode) {
   const b=document.getElementById('syncBadge');
   const d=document.getElementById('syncDot');
   const l=document.getElementById('syncLabel');
-  if (mode==='live')   { b.className='sync-badge sb-live'; d.className='sb-dot sd-live'; l.textContent='Sheets Sync'; }
-  else if (mode==='saving') { b.className='sync-badge sb-saving'; d.className='sb-dot sd-saving'; l.textContent='กำลังบันทึก...'; }
-  else if (mode==='demo') { b.className='sync-badge sb-off'; d.className='sb-dot sd-off'; l.textContent='Demo'; }
-  else                 { b.className='sync-badge sb-off'; d.className='sb-dot sd-off'; l.textContent='ไม่ได้เชื่อมต่อ'; }
+  if      (mode==='live')    { b.className='sync-badge sb-live';   d.className='sb-dot sd-live';   l.textContent='Sheets Sync'; }
+  else if (mode==='saving')  { b.className='sync-badge sb-saving'; d.className='sb-dot sd-saving'; l.textContent='กำลังบันทึก...'; }
+  else if (mode==='loading') { b.className='sync-badge sb-saving'; d.className='sb-dot sd-saving'; l.textContent='กำลังโหลด...'; }
+  else if (mode==='demo')    { b.className='sync-badge sb-off';    d.className='sb-dot sd-off';    l.textContent='Demo'; }
+  else                       { b.className='sync-badge sb-off';    d.className='sb-dot sd-off';    l.textContent='ไม่ได้เชื่อมต่อ'; }
 }
 
 // ── RELOAD ───────────────────────────────────────────
 async function reloadData() {
   if (!scriptUrl) { showToast('ไม่ได้เชื่อมต่อ Sheets','err'); return; }
-  setSyncUI('saving');
+  setSyncUI('loading');
   try {
     const d = await apiFetch('load');
     if (d.ok) {
       if (d.categories) state.categories = d.categories;
       if (d.tasks)      state.tasks      = d.tasks;
-      renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
+      selectedIds.clear();
+      validateFilter();
+      refreshUI();
       setSyncUI('live');
       showToast('โหลดข้อมูลใหม่สำเร็จ');
+    } else {
+      setSyncUI('err');
+      showToast('โหลดไม่สำเร็จ: ' + (d.error || 'ไม่ทราบสาเหตุ'),'err');
     }
-  } catch(e) { setSyncUI('err'); showToast('โหลดไม่สำเร็จ','err'); }
+  } catch(e) { setSyncUI('err'); showToast('โหลดไม่สำเร็จ: ' + e.message,'err'); }
 }
 
 // ── TABLE ─────────────────────────────────────────────
@@ -650,31 +705,31 @@ function renderFilterTabs() {
   state.tasks.forEach(t=>{cnt[t.category]=(cnt[t.category]||0)+1});
   document.getElementById('filterTabs').innerHTML = cats.map(c=>{
     const n=c==='ทั้งหมด'?state.tasks.length:(cnt[c]||0);
-    return `<button class="ftab${state.filter===c?' active':''}" onclick="setFilter('${c}')">${c}<span class="count">${n}</span></button>`;
+    return `<button class="ftab${state.filter===c?' active':''}" data-filter="${esc(c)}">${esc(c)}<span class="count">${n}</span></button>`;
   }).join('');
 }
 
-function setFilter(f) { state.filter=f; renderAll(); renderFilterTabs(); lucide.createIcons(); }
+function setFilter(f) { state.filter=f; localStorage.setItem(LS_FILTER,f); renderAll(); renderFilterTabs(); lucide.createIcons(); }
 
 function renderAll() {
   const body=document.getElementById('tableBody');
   const list=state.filter==='ทั้งหมด'?state.tasks:state.tasks.filter(t=>t.category===state.filter);
   if (list.length===0) {
     body.innerHTML=`
-      <tr><td colspan="19"><div class="empty-state">
+      <tr><td colspan="21"><div class="empty-state">
         <div class="empty-icon"><i data-lucide="clipboard-list"></i></div>
         <div class="empty-title">ยังไม่มีรายการ KPI</div>
         <div class="empty-sub">กดปุ่ม "เพิ่มรายการ" เพื่อเริ่มบันทึก</div>
         <button class="btn btn-primary" onclick="addRow()" style="margin-top:8px"><i data-lucide="plus"></i> เพิ่มรายการแรก</button>
       </div></td></tr>
-      <tr class="add-row"><td colspan="19"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+      <tr class="add-row"><td colspan="21"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
     updateDeleteToolbar();
     return;
   }
   let st=0,sa=Array(12).fill(0),tot=0;
   list.forEach(t=>{
-    st+=t.targetType==='monthly'?t.targetValue*12:t.targetValue;
-    tot+=t.actuals.reduce((a,b)=>a+b,0);
+    st+=yearlyTarget(t);
+    tot+=yearlyActual(t);
     t.actuals.forEach((v,i)=>sa[i]+=v);
   });
   body.innerHTML = list.map(buildRow).join('') +
@@ -686,24 +741,23 @@ function renderAll() {
       <td><div class="summary-num" style="color:#60a5fa">${tot.toLocaleString()}</div></td>
       <td colspan="3"></td>
     </tr>
-    <tr class="add-row"><td colspan="19"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+    <tr class="add-row"><td colspan="21"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
   // sync cbAll state
   const cbAll = document.getElementById('cbAll');
   if (cbAll) {
     const allIds = list.map(t=>String(t.id));
-    const allChecked = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
+    const allChecked = allIds.length > 0 && allIds.every(sid => selectedIds.has(sid));
     cbAll.checked = allChecked;
-    cbAll.indeterminate = !allChecked && allIds.some(id => selectedIds.has(id));
+    cbAll.indeterminate = !allChecked && allIds.some(sid => selectedIds.has(sid));
   }
   updateDeleteToolbar();
 }
 
 function buildRow(task) {
-  const yt=task.targetType==='monthly'?task.targetValue*12:task.targetValue;
-  const ya=task.actuals.reduce((a,b)=>a+b,0);
+  const yt=yearlyTarget(task);
+  const ya=yearlyActual(task);
   const pct=yt>0?Math.min((ya/yt)*100,100):0;
   const si=getStatusInfo(yt>0?(ya/yt)*100:0);
-  const bc=BADGE[Math.max(0,state.categories.indexOf(task.category)%BADGE.length)];
   const isSelected = selectedIds.has(String(task.id));
   return `
   <tr id="row-${task.id}" class="${isSelected?'row-selected':''}">
@@ -712,11 +766,11 @@ function buildRow(task) {
         <input type="checkbox" class="cb" ${isSelected?'checked':''} onchange="toggleSelect('${task.id}',this.checked)" title="เลือกรายการนี้"/>
       </div>
     </td>
-    <td class="cell-editable"><input class="cell-input" value="${esc(task.title)}" placeholder="ชื่อรายการ KPI..."
+    <td class="cell-editable"><input class="cell-input" value="${esc(task.title)}" placeholder="ชื่อรายการ KPI..." maxlength="150"
       style="padding-left:10px"
       onchange="updateField('${task.id}','title',this.value)" oninput="updateField('${task.id}','title',this.value,true)"/></td>
     <td><select class="cell-select" onchange="updateField('${task.id}','category',this.value)">
-      ${state.categories.map(c=>`<option value="${c}"${c===task.category?' selected':''}>${c}</option>`).join('')}
+      ${state.categories.map(c=>`<option value="${esc(c)}"${c===task.category?' selected':''}>${esc(c)}</option>`).join('')}
     </select></td>
     <td class="cell-editable"><input class="cell-numbox" type="number" min="0" value="${task.targetValue||''}" placeholder="0" style="padding:12px 8px"
       onchange="updateField('${task.id}','targetValue',Number(this.value))" oninput="updateField('${task.id}','targetValue',Number(this.value),true)"/></td>
@@ -749,30 +803,35 @@ function getStatusInfo(p){
 }
 
 // ── UPDATE ────────────────────────────────────────────
+const ALLOWED_TASK_FIELDS = new Set(['title','category','targetValue','targetType']);
 function updateField(id, field, val, quietMode) {
-  const t=state.tasks.find(t=>t.id==id); if(!t) return;
+  if (!ALLOWED_TASK_FIELDS.has(field)) return;
+  const t=findTaskById(id); if(!t) return;
+  if (field==='targetValue') {
+    const n=Number(val); if(isNaN(n)||n<0) return; val=n;
+  }
   t[field]=val;
   if (!quietMode) { renderStats(); save(); }
   else debounceRefresh();
 }
 function updateActual(id, month, val, quietMode) {
-  const t=state.tasks.find(t=>t.id==id); if(!t) return;
-  t.actuals[month]=Number(val)||0;
+  const t=findTaskById(id); if(!t) return;
+  const n=Number(val)||0; if(n<0) return;
+  t.actuals[month]=n;
   if (!quietMode) { renderStats(); save(); }
   else debounceRefresh();
 }
 let refreshTimer=null;
 function debounceRefresh() {
   clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(()=>{ renderStats(); save(); }, 600);
+  refreshTimer = setTimeout(()=>{ renderStats(); save(); }, REFRESH_DELAY_MS);
 }
 
 // ── ADD / DELETE ──────────────────────────────────────
 function addRow() {
-  const task={id:Date.now(),title:'',category:state.categories[0]||'งานหลัก',targetType:'monthly',targetValue:0,actuals:Array(12).fill(0)};
+  const task={id:newId(),title:'',category:state.categories[0]||'งานหลัก',targetType:'monthly',targetValue:0,actuals:Array(12).fill(0)};
   state.tasks.push(task);
-  save();
-  renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
+  save(); refreshUI();
   setTimeout(()=>{
     const row=document.getElementById('row-'+task.id);
     if(row){ const inp=row.querySelector('.cell-input'); if(inp){inp.focus();inp.select();} row.scrollIntoView({behavior:'smooth',block:'center'}); }
@@ -781,7 +840,7 @@ function addRow() {
 }
 
 function deleteRow(id) {
-  const t = state.tasks.find(t => t.id == id);
+  const t = findTaskById(id);
   const name = t?.title || 'รายการนี้';
   showConfirm(
     'ยืนยันการลบรายการ',
@@ -789,15 +848,14 @@ function deleteRow(id) {
     [name],
     'ลบ 1 รายการ',
     () => {
-      // flash row red before removing
       const row = document.getElementById('row-'+id);
-      if (row) { row.style.transition='opacity .25s'; row.style.opacity='0'; }
+      if (row) { row.style.transition=`opacity ${ROW_FADE_MS}ms`; row.style.opacity='0'; }
       setTimeout(() => {
         selectedIds.delete(String(id));
-        state.tasks = state.tasks.filter(t => t.id != id);
-        save(); renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
+        state.tasks = state.tasks.filter(t => String(t.id) !== String(id));
+        save(); refreshUI();
         showToast('ลบรายการสำเร็จ');
-      }, 220);
+      }, ROW_FADE_MS);
     }
   );
 }
@@ -814,9 +872,9 @@ function toggleSelect(id, checked) {
   const cbAll = document.getElementById('cbAll');
   if (cbAll) {
     const allIds = list.map(t=>String(t.id));
-    const allChecked = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
+    const allChecked = allIds.length > 0 && allIds.every(sid => selectedIds.has(sid));
     cbAll.checked = allChecked;
-    cbAll.indeterminate = !allChecked && allIds.some(id => selectedIds.has(id));
+    cbAll.indeterminate = !allChecked && allIds.some(sid => selectedIds.has(sid));
   }
   updateDeleteToolbar();
 }
@@ -851,14 +909,13 @@ function updateDeleteToolbar() {
     toolbar.classList.toggle('visible', n > 0);
     if (countEl) countEl.textContent = n;
   }
-  lucide.createIcons();
 }
 
 function deleteSelected() {
   const n = selectedIds.size;
   if (n === 0) return;
   const names = [...selectedIds].map(id => {
-    const t = state.tasks.find(t => String(t.id) === id);
+    const t = findTaskById(id);
     return t?.title || `รายการ #${id}`;
   });
   showConfirm(
@@ -867,17 +924,17 @@ function deleteSelected() {
     names,
     `ลบ ${n} รายการ`,
     () => {
-      // fade out selected rows
-      selectedIds.forEach(id => {
+      const toDelete = new Set(selectedIds);
+      toDelete.forEach(id => {
         const row = document.getElementById('row-'+id);
-        if (row) { row.style.transition='opacity .2s'; row.style.opacity='0'; }
+        if (row) { row.style.transition=`opacity ${ROW_FADE_MS}ms`; row.style.opacity='0'; }
       });
       setTimeout(() => {
-        state.tasks = state.tasks.filter(t => !selectedIds.has(String(t.id)));
-        selectedIds.clear();
-        save(); renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
-        showToast(`ลบ ${n} รายการสำเร็จ`);
-      }, 220);
+        state.tasks = state.tasks.filter(t => !toDelete.has(String(t.id)));
+        toDelete.forEach(id => selectedIds.delete(id));
+        save(); refreshUI();
+        showToast(`ลบ ${toDelete.size} รายการสำเร็จ`);
+      }, ROW_FADE_MS);
     }
   );
 }
@@ -885,16 +942,9 @@ function deleteSelected() {
 // ── STATS ─────────────────────────────────────────────
 function renderStats() {
   let tt=0,ta=0;
-  state.tasks.forEach(t=>{
-    tt+=t.targetType==='monthly'?t.targetValue*12:t.targetValue;
-    ta+=t.actuals.reduce((a,b)=>a+b,0);
-  });
+  state.tasks.forEach(t=>{ tt+=yearlyTarget(t); ta+=yearlyActual(t); });
   const p=tt>0?(ta/tt)*100:0;
-  const onTrack=state.tasks.filter(t=>{
-    const yt=t.targetType==='monthly'?t.targetValue*12:t.targetValue;
-    const ya=t.actuals.reduce((a,b)=>a+b,0);
-    return yt>0&&(ya/yt)>=0.8;
-  }).length;
+  const onTrack=state.tasks.filter(t=>{ const yt=yearlyTarget(t); return yt>0&&(yearlyActual(t)/yt)>=0.8; }).length;
   document.getElementById('statTarget').textContent=tt.toLocaleString();
   document.getElementById('statActual').textContent=ta.toLocaleString();
   const pe=document.getElementById('statPct');
@@ -909,30 +959,50 @@ function renderStats() {
 function renderSettings(){
   document.getElementById('catList').innerHTML=state.categories.map((c,i)=>`
     <div class="cat-chip">
-      <span><span class="badge ${BADGE[i%BADGE.length]}" style="margin-right:6px">●</span>${c}</span>
-      <button class="del" onclick="delCat(${i})"><i data-lucide="x"></i></button>
+      <span><span class="badge ${BADGE[i%BADGE.length]}" style="margin-right:6px">●</span>${esc(c)}</span>
+      <button class="del" data-delcat="${esc(c)}"><i data-lucide="x"></i></button>
     </div>`).join('');
   lucide.createIcons();
 }
-function openSettings(){ document.getElementById('drawerOverlay').style.display='block'; document.getElementById('drawer').style.display='block'; renderSettings(); lucide.createIcons(); }
+document.getElementById('catList').addEventListener('click', e => {
+  const btn = e.target.closest('[data-delcat]');
+  if (btn) delCat(btn.dataset.delcat);
+});
+function openSettings(){ document.getElementById('drawerOverlay').style.display='block'; document.getElementById('drawer').style.display='block'; renderSettings(); }
 function closeSettings(){ document.getElementById('drawerOverlay').style.display='none'; document.getElementById('drawer').style.display='none'; }
 function addCat(){
   const v=document.getElementById('newCatInput').value.trim();
-  if(!v||state.categories.includes(v)) return;
+  if(!v) return;
+  if(state.categories.some(c=>c.trim()===v)){ showToast(`ประเภท "${v}" มีอยู่แล้ว`,'err'); return; }
   state.categories.push(v);
   document.getElementById('newCatInput').value='';
-  save(); renderSettings(); renderFilterTabs(); renderAll(); lucide.createIcons();
+  refreshCategoryUI();
   showToast(`เพิ่มประเภท "${v}" สำเร็จ`);
 }
-function delCat(i){
-  const c=state.categories[i]; state.categories.splice(i,1);
-  save(); renderSettings(); renderFilterTabs(); renderAll(); lucide.createIcons();
-  showToast(`ลบประเภท "${c}" สำเร็จ`);
+function delCat(catName){
+  if(state.categories.length<=1){ showToast('ต้องมีประเภทงานอย่างน้อย 1 ประเภท','err'); return; }
+  const c=catName;
+  const orphans=state.tasks.filter(t=>t.category===c).length;
+  const fb=state.categories.find(x=>x!==c)||'';
+  const doDelete=()=>{
+    const idx=state.categories.indexOf(c); if(idx===-1) return;
+    if(orphans>0) state.tasks.forEach(t=>{ if(t.category===c) t.category=fb; });
+    state.categories.splice(idx,1);
+    if(state.filter===c){ state.filter='ทั้งหมด'; localStorage.setItem(LS_FILTER,'ทั้งหมด'); }
+    refreshCategoryUI();
+    showToast(`ลบประเภท "${c}" สำเร็จ`);
+  };
+  if(orphans>0){
+    showConfirm(`ลบประเภท "${c}"`,
+      `มี ${orphans} รายการ KPI ที่ใช้ประเภทนี้อยู่ จะถูกย้ายไปยัง "${fb||'(ไม่มีประเภท)'}" โดยอัตโนมัติ`,
+      [], `ลบและย้ายประเภท`, doDelete);
+  } else { doDelete(); }
 }
 function clearAll(){
   showConfirm('ล้างข้อมูลทั้งหมด','ต้องการลบข้อมูล KPI ทั้งหมด? ไม่สามารถกู้คืนได้', [], 'ล้างทั้งหมด', ()=>{
-    state.tasks=[]; selectedIds.clear(); save(); closeSettings();
-    renderAll(); renderStats(); renderFilterTabs(); lucide.createIcons();
+    state.tasks=[]; selectedIds.clear();
+    state.filter='ทั้งหมด'; localStorage.setItem(LS_FILTER,'ทั้งหมด');
+    save(); closeSettings(); refreshUI();
     showToast('ล้างข้อมูลทั้งหมดแล้ว');
   });
 }
@@ -957,7 +1027,8 @@ function exportExcel(){
 function backupData(){
   const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
   const u=URL.createObjectURL(b);
-  const a=document.createElement('a'); a.href=u; a.download=`kpi_backup_${state.year}.json`; a.click();
+  const a=document.createElement('a'); a.href=u; a.download=`kpi_backup_${state.year}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(u); showToast('Backup สำเร็จ');
 }
 
@@ -971,9 +1042,13 @@ function showConfirm(title, msg, names, btnLabel, onYes) {
   const namesEl = document.getElementById('confirmNames');
   if (names && names.length) {
     namesEl.style.display = 'flex';
-    namesEl.innerHTML = names.map(n =>
-      `<div class="confirm-name-item"><i data-lucide="minus-circle"></i>${n||'(ไม่มีชื่อ)'}</div>`
-    ).join('');
+    const shown = names.slice(0, CONFIRM_LIST_MAX);
+    const extra = names.length - shown.length;
+    namesEl.innerHTML = shown.map(n =>
+      `<div class="confirm-name-item"><i data-lucide="minus-circle"></i>${esc(n)||'(ไม่มีชื่อ)'}</div>`
+    ).join('') + (extra > 0
+      ? `<div class="confirm-name-item" style="opacity:.6;font-style:italic">และอีก ${extra} รายการ...</div>`
+      : '');
   } else {
     namesEl.style.display = 'none';
     namesEl.innerHTML = '';
@@ -993,27 +1068,35 @@ function showToast(msg, type='ok'){
   el.className='toast toast-'+type;
   icon.setAttribute('data-lucide', type==='err'?'x-circle':type==='info'?'info':'check-circle');
   el.style.display='flex'; el.style.animation='none'; void el.offsetWidth; el.style.animation='';
-  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.style.display='none',2800);
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.style.display='none',TOAST_DURATION_MS);
   lucide.createIcons();
 }
 
 // ── EVENTS ───────────────────────────────────────────
+document.getElementById('filterTabs').addEventListener('click', e=>{
+  const btn=e.target.closest('.ftab');
+  if(btn && btn.dataset.filter !== undefined) setFilter(btn.dataset.filter);
+});
 document.getElementById('btnAdd').onclick      = addRow;
 document.getElementById('btnSettings').onclick = openSettings;
 document.getElementById('btnExcel').onclick    = exportExcel;
 document.getElementById('btnBackup').onclick   = backupData;
 document.getElementById('btnReload').onclick   = reloadData;
 document.getElementById('yearInput').onchange  = function(){
-  state.year=Number(this.value)||state.year;
-  localStorage.setItem(LS_YEAR,state.year);
+  const y=Number(this.value);
+  if(isNaN(y)||y<2400||y>2700){ this.value=state.year; showToast('ปีไม่ถูกต้อง (2400–2700)','err'); return; }
+  state.year=y; localStorage.setItem(LS_YEAR,state.year);
   save(); showToast(`เปลี่ยนปีเป็น พ.ศ. ${state.year}`);
 };
 document.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&e.key==='Enter') addRow();
-  if(e.key==='Escape'){ closeSettings(); document.getElementById('confirmOverlay').style.display='none'; }
+  if(e.key==='Escape'){ closeSettings(); document.getElementById('confirmOverlay').style.display='none'; confirmCb=null; }
+});
+window.addEventListener('beforeunload', e=>{
+  if(saveTimer!==null && !isDemoMode && scriptUrl){ e.preventDefault(); e.returnValue=''; }
 });
 
-function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 </script>
 </body>
 </html>
