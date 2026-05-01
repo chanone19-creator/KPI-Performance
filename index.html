@@ -456,7 +456,7 @@ tr:hover .row-del-btn{color:var(--slate2)}
   <div class="form-group">
     <label class="form-label">เพิ่มประเภทงาน</label>
     <div style="display:flex;gap:6px">
-      <input class="form-input" id="newCatInput" placeholder="ชื่อประเภท..." onkeydown="if(event.key==='Enter')addCat()"/>
+      <input class="form-input" id="newCatInput" placeholder="ชื่อประเภท..." maxlength="50" onkeydown="if(event.key==='Enter')addCat()"/>
       <button class="btn btn-primary" onclick="addCat()" style="padding:9px 14px;flex-shrink:0"><i data-lucide="plus"></i></button>
     </div>
   </div>
@@ -556,7 +556,7 @@ async function connectSheets(url) {
     if (data.ok) {
       if (data.categories) state.categories = data.categories;
       if (data.tasks)      state.tasks      = data.tasks;
-      if (data.year)       { state.year = data.year; document.getElementById('yearInput').value = data.year; }
+      if (data.year)       { state.year = data.year; document.getElementById('yearInput').value = data.year; localStorage.setItem(LS_YEAR, data.year); }
       localStorage.setItem(LS_URL, u);
       setStatus('ok','✅ เชื่อมต่อสำเร็จ! กำลังเปิด...');
       setTimeout(enterApp, CONNECT_DELAY_MS);
@@ -715,12 +715,13 @@ function renderAll() {
   const body=document.getElementById('tableBody');
   const list=state.filter==='ทั้งหมด'?state.tasks:state.tasks.filter(t=>t.category===state.filter);
   if (list.length===0) {
+    const isFiltered = state.filter !== 'ทั้งหมด' && state.tasks.length > 0;
     body.innerHTML=`
       <tr><td colspan="21"><div class="empty-state">
-        <div class="empty-icon"><i data-lucide="clipboard-list"></i></div>
-        <div class="empty-title">ยังไม่มีรายการ KPI</div>
-        <div class="empty-sub">กดปุ่ม "เพิ่มรายการ" เพื่อเริ่มบันทึก</div>
-        <button class="btn btn-primary" onclick="addRow()" style="margin-top:8px"><i data-lucide="plus"></i> เพิ่มรายการแรก</button>
+        <div class="empty-icon"><i data-lucide="${isFiltered?'filter-x':'clipboard-list'}"></i></div>
+        <div class="empty-title">${isFiltered?`ไม่มีรายการในประเภท "${esc(state.filter)}"` :'ยังไม่มีรายการ KPI'}</div>
+        <div class="empty-sub">${isFiltered?'ลองเปลี่ยนตัวกรองหรือเพิ่มรายการใหม่':'กดปุ่ม "เพิ่มรายการ" เพื่อเริ่มบันทึก'}</div>
+        ${isFiltered?'':`<button class="btn btn-primary" onclick="addRow()" style="margin-top:8px"><i data-lucide="plus"></i> เพิ่มรายการแรก</button>`}
       </div></td></tr>
       <tr class="add-row"><td colspan="21"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
     updateDeleteToolbar();
@@ -1011,18 +1012,22 @@ function changeScriptUrl(){ localStorage.removeItem(LS_URL); closeSettings(); lo
 // ── EXPORT ───────────────────────────────────────────
 function exportExcel(){
   if(!state.tasks.length){showToast('ไม่มีข้อมูล','err');return;}
-  const data=state.tasks.map(t=>{
-    const yt=t.targetType==='monthly'?t.targetValue*12:t.targetValue;
-    const ya=t.actuals.reduce((a,b)=>a+b,0);
-    const row={'รายการ KPI':t.title,'ประเภท':t.category,'รูปแบบ':t.targetType==='monthly'?'รายเดือน':'ปีรวม','เป้าหมาย':t.targetValue,'เป้าปีรวม':yt,'ผลจริงรวม':ya,'สำเร็จ(%)':yt>0?((ya/yt)*100).toFixed(2)+'%':'0%'};
-    MONTHS.forEach((m,i)=>row[m]=t.actuals[i]);
-    return row;
-  });
-  const ws=XLSX.utils.json_to_sheet(data);
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'KPI');
-  XLSX.writeFile(wb,`KPI_${state.year}.xlsx`);
-  showToast('Export Excel สำเร็จ');
+  try {
+    const data=state.tasks.map(t=>{
+      const yt=yearlyTarget(t);
+      const ya=yearlyActual(t);
+      const row={'รายการ KPI':t.title,'ประเภท':t.category,'รูปแบบ':t.targetType==='monthly'?'รายเดือน':'ปีรวม','เป้าหมาย':t.targetValue,'เป้าปีรวม':yt,'ผลจริงรวม':ya,'สำเร็จ(%)':yt>0?((ya/yt)*100).toFixed(2)+'%':'0%'};
+      MONTHS.forEach((m,i)=>row[m]=t.actuals[i]);
+      return row;
+    });
+    const ws=XLSX.utils.json_to_sheet(data);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'KPI');
+    XLSX.writeFile(wb,`KPI_${state.year}.xlsx`);
+    showToast('Export Excel สำเร็จ');
+  } catch(e) {
+    showToast('Export ล้มเหลว: ' + e.message, 'err');
+  }
 }
 function backupData(){
   const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
