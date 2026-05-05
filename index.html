@@ -6,8 +6,8 @@
 <title>KPI ระบบปฏิบัติงาน — Google Sheets</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -652,11 +652,12 @@ function setSyncUI(mode) {
   const b=document.getElementById('syncBadge');
   const d=document.getElementById('syncDot');
   const l=document.getElementById('syncLabel');
-  if      (mode==='live')    { b.className='sync-badge sb-live';   d.className='sb-dot sd-live';   l.textContent='Sheets Sync'; }
+  const bs=document.getElementById('btnOpenSheet');
+  if      (mode==='live')    { b.className='sync-badge sb-live';   d.className='sb-dot sd-live';   l.textContent='Sheets Sync'; if(bs) bs.style.display=''; }
   else if (mode==='saving')  { b.className='sync-badge sb-saving'; d.className='sb-dot sd-saving'; l.textContent='กำลังบันทึก...'; }
   else if (mode==='loading') { b.className='sync-badge sb-saving'; d.className='sb-dot sd-saving'; l.textContent='กำลังโหลด...'; }
-  else if (mode==='demo')    { b.className='sync-badge sb-off';    d.className='sb-dot sd-off';    l.textContent='Demo'; }
-  else                       { b.className='sync-badge sb-off';    d.className='sb-dot sd-off';    l.textContent='ไม่ได้เชื่อมต่อ'; }
+  else if (mode==='demo')    { b.className='sync-badge sb-off';    d.className='sb-dot sd-off';    l.textContent='Demo';          if(bs) bs.style.display='none'; }
+  else                       { b.className='sync-badge sb-off';    d.className='sb-dot sd-off';    l.textContent='ไม่ได้เชื่อมต่อ'; if(bs) bs.style.display='none'; }
 }
 
 // ── RELOAD ───────────────────────────────────────────
@@ -668,6 +669,7 @@ async function reloadData() {
     if (d.ok) {
       if (d.categories) state.categories = d.categories;
       if (d.tasks)      state.tasks      = d.tasks;
+      if (d.year)       { state.year = d.year; document.getElementById('yearInput').value = d.year; localStorage.setItem(LS_YEAR, d.year); }
       selectedIds.clear();
       validateFilter();
       refreshUI();
@@ -1082,11 +1084,12 @@ document.getElementById('filterTabs').addEventListener('click', e=>{
   const btn=e.target.closest('.ftab');
   if(btn && btn.dataset.filter !== undefined) setFilter(btn.dataset.filter);
 });
-document.getElementById('btnAdd').onclick      = addRow;
-document.getElementById('btnSettings').onclick = openSettings;
-document.getElementById('btnExcel').onclick    = exportExcel;
-document.getElementById('btnBackup').onclick   = backupData;
-document.getElementById('btnReload').onclick   = reloadData;
+document.getElementById('btnAdd').onclick       = addRow;
+document.getElementById('btnSettings').onclick  = openSettings;
+document.getElementById('btnExcel').onclick     = exportExcel;
+document.getElementById('btnBackup').onclick    = backupData;
+document.getElementById('btnReload').onclick    = reloadData;
+document.getElementById('btnOpenSheet').onclick = () => { if (scriptUrl) window.open(scriptUrl, '_blank'); };
 document.getElementById('yearInput').onchange  = function(){
   const y=Number(this.value);
   if(isNaN(y)||y<2400||y>2700){ this.value=state.year; showToast('ปีไม่ถูกต้อง (2400–2700)','err'); return; }
