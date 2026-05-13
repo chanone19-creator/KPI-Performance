@@ -264,6 +264,11 @@ tr:hover .row-del-btn{color:var(--slate2)}
 .cat-chip .del svg{width:13px;height:13px}
 .divider{height:1px;background:var(--border);margin:14px 0}
 
+/* ── CELL TOTAL (ผลรวม column) ── */
+.cell-inner{display:flex;align-items:center;padding:12px 14px}
+/* ── TABLE HEADER ALIGNMENT ── */
+th.right{text-align:right}
+
 @media(max-width:768px){.topbar{padding:0 14px}.main{padding:14px}.logo-sub{display:none}.stat-value{font-size:22px}}
 </style>
 </head>
@@ -355,9 +360,9 @@ tr:hover .row-del-btn{color:var(--slate2)}
       <i data-lucide="calendar-days"></i>
       <input type="number" id="yearInput" value="2568"/>
     </div>
-    <button class="btn btn-ghost" id="btnOpenSheet" style="display:none">
+    <a class="btn btn-ghost" id="btnOpenSheet" href="#" target="_blank" style="display:none">
       <i data-lucide="external-link"></i> เปิด Sheet
-    </button>
+    </a>
     <button class="btn btn-ghost" id="btnSettings"><i data-lucide="settings-2"></i> ตั้งค่า</button>
     <button class="btn btn-green" id="btnExcel"><i data-lucide="file-spreadsheet"></i> Excel</button>
     <button class="btn btn-primary" id="btnAdd"><i data-lucide="plus"></i> เพิ่มรายการ</button>
@@ -533,6 +538,8 @@ async function connectSheets(url) {
       if (data.year)       { state.year = data.year; document.getElementById('yearInput').value = data.year; }
       localStorage.setItem(LS_URL, u);
       setStatus('ok','✅ เชื่อมต่อสำเร็จ! กำลังเปิด...');
+      const sheetBtn=document.getElementById('btnOpenSheet');
+      if(sheetBtn){ sheetBtn.href=u; sheetBtn.style.display='inline-flex'; }
       setTimeout(enterApp, 600);
     } else {
       setStatus('err','❌ '+data.error);
@@ -650,8 +657,11 @@ function renderFilterTabs() {
   state.tasks.forEach(t=>{cnt[t.category]=(cnt[t.category]||0)+1});
   document.getElementById('filterTabs').innerHTML = cats.map(c=>{
     const n=c==='ทั้งหมด'?state.tasks.length:(cnt[c]||0);
-    return `<button class="ftab${state.filter===c?' active':''}" onclick="setFilter('${c}')">${c}<span class="count">${n}</span></button>`;
+    return `<button class="ftab${state.filter===c?' active':''}" data-filter="${esc(c)}">${esc(c)}<span class="count">${n}</span></button>`;
   }).join('');
+  document.getElementById('filterTabs').querySelectorAll('.ftab').forEach(btn=>{
+    btn.onclick=()=>setFilter(btn.dataset.filter);
+  });
 }
 
 function setFilter(f) { state.filter=f; renderAll(); renderFilterTabs(); lucide.createIcons(); }
@@ -661,13 +671,13 @@ function renderAll() {
   const list=state.filter==='ทั้งหมด'?state.tasks:state.tasks.filter(t=>t.category===state.filter);
   if (list.length===0) {
     body.innerHTML=`
-      <tr><td colspan="19"><div class="empty-state">
+      <tr><td colspan="21"><div class="empty-state">
         <div class="empty-icon"><i data-lucide="clipboard-list"></i></div>
         <div class="empty-title">ยังไม่มีรายการ KPI</div>
         <div class="empty-sub">กดปุ่ม "เพิ่มรายการ" เพื่อเริ่มบันทึก</div>
         <button class="btn btn-primary" onclick="addRow()" style="margin-top:8px"><i data-lucide="plus"></i> เพิ่มรายการแรก</button>
       </div></td></tr>
-      <tr class="add-row"><td colspan="19"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+      <tr class="add-row"><td colspan="21"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
     updateDeleteToolbar();
     return;
   }
@@ -686,7 +696,7 @@ function renderAll() {
       <td><div class="summary-num" style="color:#60a5fa">${tot.toLocaleString()}</div></td>
       <td colspan="3"></td>
     </tr>
-    <tr class="add-row"><td colspan="19"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
+    <tr class="add-row"><td colspan="21"><button class="add-row-btn" onclick="addRow()"><i data-lucide="plus-circle"></i> เพิ่มรายการ KPI ใหม่</button></td></tr>`;
   // sync cbAll state
   const cbAll = document.getElementById('cbAll');
   if (cbAll) {
@@ -716,7 +726,7 @@ function buildRow(task) {
       style="padding-left:10px"
       onchange="updateField('${task.id}','title',this.value)" oninput="updateField('${task.id}','title',this.value,true)"/></td>
     <td><select class="cell-select" onchange="updateField('${task.id}','category',this.value)">
-      ${state.categories.map(c=>`<option value="${c}"${c===task.category?' selected':''}>${c}</option>`).join('')}
+      ${state.categories.map(c=>`<option value="${esc(c)}"${c===task.category?' selected':''}>${esc(c)}</option>`).join('')}
     </select></td>
     <td class="cell-editable"><input class="cell-numbox" type="number" min="0" value="${task.targetValue||''}" placeholder="0" style="padding:12px 8px"
       onchange="updateField('${task.id}','targetValue',Number(this.value))" oninput="updateField('${task.id}','targetValue',Number(this.value),true)"/></td>
@@ -909,9 +919,12 @@ function renderStats() {
 function renderSettings(){
   document.getElementById('catList').innerHTML=state.categories.map((c,i)=>`
     <div class="cat-chip">
-      <span><span class="badge ${BADGE[i%BADGE.length]}" style="margin-right:6px">●</span>${c}</span>
-      <button class="del" onclick="delCat(${i})"><i data-lucide="x"></i></button>
+      <span><span class="badge ${BADGE[i%BADGE.length]}" style="margin-right:6px">●</span>${esc(c)}</span>
+      <button class="del" data-cat-idx="${i}" aria-label="ลบประเภท ${esc(c)}"><i data-lucide="x"></i></button>
     </div>`).join('');
+  document.getElementById('catList').querySelectorAll('.del').forEach(btn=>{
+    btn.onclick=()=>delCat(Number(btn.dataset.catIdx));
+  });
   lucide.createIcons();
 }
 function openSettings(){ document.getElementById('drawerOverlay').style.display='block'; document.getElementById('drawer').style.display='block'; renderSettings(); lucide.createIcons(); }
@@ -925,9 +938,14 @@ function addCat(){
   showToast(`เพิ่มประเภท "${v}" สำเร็จ`);
 }
 function delCat(i){
-  const c=state.categories[i]; state.categories.splice(i,1);
-  save(); renderSettings(); renderFilterTabs(); renderAll(); lucide.createIcons();
-  showToast(`ลบประเภท "${c}" สำเร็จ`);
+  const c=state.categories[i];
+  const used=state.tasks.filter(t=>t.category===c).length;
+  const msg=used>0?`ประเภท "${c}" มีรายการ KPI อยู่ ${used} รายการ — รายการเหล่านั้นจะยังคงอยู่แต่ไม่มีประเภท`:'ต้องการลบประเภทนี้ออกจากระบบ?';
+  showConfirm(`ลบประเภท "${c}"`,msg,[],`ลบประเภท`,()=>{
+    state.categories.splice(i,1);
+    save(); renderSettings(); renderFilterTabs(); renderAll(); lucide.createIcons();
+    showToast(`ลบประเภท "${c}" สำเร็จ`);
+  });
 }
 function clearAll(){
   showConfirm('ล้างข้อมูลทั้งหมด','ต้องการลบข้อมูล KPI ทั้งหมด? ไม่สามารถกู้คืนได้', [], 'ล้างทั้งหมด', ()=>{
@@ -972,7 +990,7 @@ function showConfirm(title, msg, names, btnLabel, onYes) {
   if (names && names.length) {
     namesEl.style.display = 'flex';
     namesEl.innerHTML = names.map(n =>
-      `<div class="confirm-name-item"><i data-lucide="minus-circle"></i>${n||'(ไม่มีชื่อ)'}</div>`
+      `<div class="confirm-name-item"><i data-lucide="minus-circle"></i>${esc(n)||'(ไม่มีชื่อ)'}</div>`
     ).join('');
   } else {
     namesEl.style.display = 'none';
