@@ -528,6 +528,10 @@ async function connectSheets(url) {
     setStatus('err','❌ URL ไม่ถูกต้อง ต้องขึ้นต้นด้วย https://script.google.com');
     return;
   }
+  if (!u.includes('/macros/s/') || !u.endsWith('/exec')) {
+    setStatus('err','❌ URL ไม่สมบูรณ์ ต้องอยู่ในรูป .../macros/s/XXXX/exec');
+    return;
+  }
   scriptUrl = u;
   setStatus('loading','กำลังเชื่อมต่อ...');
   try {
@@ -577,16 +581,26 @@ function enterApp() {
 
 // ── API ───────────────────────────────────────────────
 async function apiFetch(action, data) {
+  let r;
   if (action === 'load') {
-    const r = await fetch(scriptUrl + '?action=load');
-    return r.json();
+    r = await fetch(scriptUrl + '?action=load');
   } else {
-    const r = await fetch(scriptUrl, {
+    r = await fetch(scriptUrl, {
       method:'POST', redirect:'follow',
       headers:{'Content-Type':'text/plain'},
       body: JSON.stringify({ action, data })
     });
-    return r.json();
+  }
+  // ตรวจ HTML (เช่น redirect ไปหน้า login) ก่อน parse JSON
+  const text = await r.text();
+  const trimmed = text.trim();
+  if (trimmed.startsWith('<')) {
+    throw new Error('Apps Script ตอบกลับเป็น HTML — ตรวจสอบว่า Web app ตั้งเป็น "Anyone" หรือยัง');
+  }
+  try {
+    return JSON.parse(text);
+  } catch(e) {
+    throw new Error('Response ไม่ใช่ JSON: ' + trimmed.slice(0,80));
   }
 }
 
